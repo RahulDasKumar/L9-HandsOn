@@ -2,10 +2,9 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 
-# Create a Spark session
 spark = SparkSession.builder.appName("RideSharingAnalytics").getOrCreate()
+spark.sparkContext.setLogLevel("ERROR")
 
-# Define the schema for incoming JSON data
 schema = StructType([
     StructField("trip_id", StringType(), True),
     StructField("driver_id", StringType(), True),
@@ -14,10 +13,21 @@ schema = StructType([
     StructField("timestamp", StringType(), True)
 ])
 
-# Read streaming data from socket
+raw_df = spark.readStream \
+    .format("socket") \
+    .option("host", "localhost") \
+    .option("port", 9999) \
+    .load()
 
-# Parse JSON data into columns using the defined schema
+parsed_df = raw_df.select(from_json(col("value"), schema).alias("data")).select("data.*")
 
-# Print parsed data to the CSV files
+def write_batch(batch_df, batch_id):
+    if not batch_df.isEmpty():
+        batch_df.toPandas().to_csv(f"outputs/task_1/batch_{batch_id}.csv", index=False, header=True)
+
+query = parsed_df.writeStream \
+    .outputMode("append") \
+    .foreachBatch(write_batch) \
+    .start()
 
 query.awaitTermination()
